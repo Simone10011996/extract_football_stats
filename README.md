@@ -1,4 +1,4 @@
-# SERIE A MATCH STATS SCRAPER (Flashscore)
+# FOOTBALL MATCH STATS SCRAPER (Flashscore)
 
 ## 1. DESCRIPTION
 This script is an automated Selenium-based web scraper designed to extract detailed football match statistics (Italian Serie A in the example, but any league can be set) from Flashscore.com.
