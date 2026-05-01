@@ -1,151 +1,79 @@
-# Football Match Stats Scraper
+========================================================================
+SERIE A MATCH STATS SCRAPER (Flashscore)
+========================================================================
 
-Python script for scraping football match statistics from FlashScore using Selenium.
+1. DESCRIPTION
+--------------
+This script is an automated Selenium-based web scraper designed to 
+extract detailed football match statistics (Italian Serie A in the 
+example, but any league can be set) from Flashscore.com.
 
-The script automatically collects:
+The system navigates through historical results, accesses each match 
+individually, extracts performance data (shots, possession, xG, etc.), 
+and saves them into a structured CSV file, ready for statistical 
+analysis or machine learning models.
 
-* Home and away teams
-* Final score
-* Matchday
-* Detailed match statistics (e.g., possession, shots, etc.)
+2. KEY FEATURES
+---------------
+- Headless Execution: Runs in the background without opening a 
+  visible browser window.
+- Duplicate Handling: Automatically skips already processed matches 
+  by checking the existing CSV file.
+- Incremental Saving: Saves data after every single match to prevent 
+  data loss in case of interruptions or errors.
+- Intelligent Parsing: Handles various statistic formats, including 
+  advanced metrics like Expected Goals (xG).
+- Auto-Sorting: Once the process is complete, it automatically sorts 
+  the final CSV by Matchday.
 
-All data is incrementally saved into a CSV file.
+3. TECHNICAL REQUIREMENTS
+-------------------------
+- Python 3.7 or higher
+- Google Chrome installed
+- Chrome Driver (handled automatically via Selenium Service)
 
----
+Required Python Libraries:
+- pandas
+- selenium
 
-## Configuration
-
-At the top of the script, you can configure the main parameters:
-
-RESULTS_URL = "https://www.flashscore.com/football/italy/serie-a/results/"
-league = "SERIE A"
-stats_path = "data/stats_seriea_25_26.csv"
-
-* RESULTS_URL: results page of the league. It can be chosen the running league but also an archived one.
-* league: league name (used to extract matchday)
-* stats_path: output CSV file path
-
----
-
-## Main Features
-
-### 1. Match Links Extraction
-
-The function `get_match_links()`:
-
-* Opens the results page
-* Extracts all available match links
-
----
-
-### 2. Single Match Parsing
-
-The function `parse_match(url)`:
-
-* Opens the match page
-* Accepts cookies (if required)
-* Navigates to the "Stats" tab
-* Extracts:
-
-  * Teams
-  * Score
-  * Matchday
-  * Statistics
-
----
-
-### 3. Statistics Processing
-
-The function `stats_object_from_list(data)`:
-
-* Converts raw scraped data into a structured dictionary:
-
-{
-"Possession": {"home": 55, "away": 45},
-"Shots on Target": {"home": 6, "away": 3}
-}
-
-It also handles special formats (e.g., values inside parentheses).
-
----
-
-### 4. Data Storage
-
-* Data is saved into a CSV file
-* The script:
-
-  * Avoids duplicates (checks existing URLs)
-  * Updates the dataset incrementally
-  * Sorts data by matchday at the end
-
----
-
-## Output
-
-The generated CSV file contains columns such as:
-
-url
-home_team
-away_team
-matchday
-score
-Possession_home
-Possession_away
-Shots on Target_home
-Shots on Target_away
-...
-
----
-
-## Requirements
-
-Install dependencies:
-
+You can install them using:
 pip install pandas selenium
 
-Make sure you have:
+4. CONFIGURATION
+----------------
+The main parameters are located in the "CONFIGURATION" section:
 
-* Google Chrome installed
-* A compatible ChromeDriver available in your system
+- RESULTS_URL: The URL of the Flashscore results page.
+- STATS_PATH: The output file path (default: data/stats_seriea_25_26.csv).
+- LEAGUE: League name used for regex filtering.
 
----
+5. USAGE
+--------
+1. Ensure all dependencies are installed.
+2. Run the script:
+   python ExtractFootballStats.py
 
-## Usage
+3. The script will start scanning for match links. If the 'data' 
+   directory does not exist, it will be created automatically.
 
-Run the script with:
+6. OUTPUT STRUCTURE (CSV)
+-------------------------
+The generated file contains one row per match with the following columns:
+- url: Unique link to the match page.
+- home_team / away_team: Names of the competing teams.
+- matchday: The league round number.
+- score: Final score.
+- [StatName]_home: Value for the home team.
+- [StatName]_away: Value for the away team.
 
-python ExtractFootballStats.py
+7. IMPORTANT NOTES
+------------------
+- Politeness: The script includes delays (time.sleep) to respect the 
+  website's loading times and avoid being blocked.
+- Selectors: CSS selectors (e.g., [data-testid="..."]) are specific 
+  to the current Flashscore layout. If the website updates its UI, 
+  these selectors might require updates.
 
-The script will:
-
-1. Collect all match links
-2. Extract only new matches (not already in CSV)
-3. Save results progressively
-
----
-
-##  Notes
-
-* The script runs in headless mode (no GUI)
-* Uses delays to ensure proper page loading
-* Website structure changes may require selector updates
-
----
-
-## Limitations
-
-* Depends on the HTML structure of the website
-* May encounter timeouts or loading issues
-* No proxy or IP rotation support
-
----
-
-## Possible Improvements
-
-* Parallel scraping
-* Advanced logging
-* Better error handling
-* Multi-league support
-* Database integration (e.g., SQL)
-
----
+========================================================================
+Developed for Football Data Analysis.
+========================================================================
