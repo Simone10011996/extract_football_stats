@@ -1,51 +1,58 @@
-######################################################################
-########################### SET PARAMETERS ###########################
-######################################################################
-
-RESULTS_URL = "https://www.flashscore.com/football/italy/serie-a/results/"
-league = "SERIE A"
-stats_path = 'data/stats_seriea_25_26.csv'
-
-######################################################################
-
-
 import time
-import pandas as pd
 import re
-import os
+import logging
+from pathlib import Path
+from typing import List, Dict, Optional, Any
+
+import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
-options = Options()
-options.add_argument("--headless")
-options.add_argument("--disable-gpu")
-options.add_argument("--no-sandbox")
-options.add_argument("--window-size=1920,1080")
+# =====================================================================
+# CONFIGURATION & PARAMETERS
+# =====================================================================
+RESULTS_URL = "https://www.flashscore.com/football/italy/serie-a/results/"
+LEAGUE = "SERIE A"
+STATS_PATH = Path('data/stats_seriea_25_26.csv')
 
-service = Service()
-driver = webdriver.Chrome(service=service, options=options)
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
+
+# =====================================================================
+# CORE FUNCTIONS
+# =====================================================================
+
+def init_driver() -> webdriver.Chrome:
+    """Initializes and returns a Chrome WebDriver instance."""
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+
+    service = Service()
+    return webdriver.Chrome(service=service, options=options)
 
 
-def stats_object_from_list(data):
+def stats_object_from_list(data: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Parses a list of text elements into a structured statistics dictionary."""
     stats = {}
     i = 0
     
     while i < len(data):
-        # Scenario 1 — normal format: [home, label, away]
-        if (
-            i + 2 < len(data)
-            and not re.match(r"^\(.*\)$", data[i + 1])  
-        ):
+        # Scenario 1 — standard format: [home_value, label, away_value]
+        if i + 2 < len(data) and not re.match(r"^\(.*\)$", data[i + 1]):
             home_val = data[i].replace("%", "").strip()
             label = data[i + 1].strip()
             away_val = data[i + 2].replace("%", "").strip()
     
-            # Converts in int or float if numeric
+            # Convert to numeric types where possible
             try:
                 home_val = float(home_val) if "." in home_val else int(home_val)
             except ValueError:
@@ -58,100 +65,112 @@ def stats_object_from_list(data):
             stats[label] = {"home": home_val, "away": away_val}
             i += 3
     
-        # Scenario 2 — format with parenthesis 
-        elif (
-            i + 4 < len(data)
-            and re.match(r"^\(.*\)$", data[i + 1])  
-        ):
+        # Scenario 2 — format with parentheses (e.g., expected goals)
+        elif i + 4 < len(data) and re.match(r"^\(.*\)$", data[i + 1]):
             home_val = data[i + 1].strip("()")     
             label = data[i + 2].strip()            
             away_val = data[i + 4].strip("()")     
             stats[label] = {"home": home_val, "away": away_val}
             i += 5
         else:
-            i += 1  # fallback
+            i += 1  # Fallback to avoid infinite loops
     return stats
 
 
-# Function to obtain links of all matches
-def get_match_links():
-    driver.get(RESULTS_URL)
-    time.sleep(5)
+def get_match_links(driver: webdriver.Chrome, url: str) -> List[str]:
+    """Scrapes all match URLs from the results page."""
+    driver.get(url)
+    wait = WebDriverWait(driver, 10)
 
-    # Wait loading of matches
+    # Handle cookie consent banner
+    try:
+        accept_button = wait.until(EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler")))
+        accept_button.click()
+    except TimeoutException:
+        pass 
+
+    # Expand the list to load more matches
+    for _ in range(3):
+        try:
+            load_more_button = wait.until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Show more matches')]"))
+            )
+            load_more_button.click()
+            time.sleep(1.5) 
+        except TimeoutException:
+            break 
+
+    time.sleep(3) 
     matches = driver.find_elements(By.CSS_SELECTOR, 'a.eventRowLink')
     links = [m.get_attribute('href') for m in matches if m.get_attribute('href')]
-    print(f"Found {len(links)} matches.")
+    
+    logging.info(f"Found {len(links)} match links.")
     return links
 
-def click_stats_tab(wait, retries=3):
+
+def click_stats_tab(wait: WebDriverWait, retries: int = 3) -> bool:
+    """Attempts to click the 'Stats' tab on a match detail page."""
     for attempt in range(retries):
         try:
             button = wait.until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, "//button[@data-testid='wcl-tab' and text()='Stats']")
-                )
+                EC.element_to_be_clickable((By.XPATH, "//button[@data-testid='wcl-tab' and text()='Stats']"))
             )
             button.click()
             return True
         except TimeoutException:
-            print(f"Attempt {attempt+1} failed for tab Stats")
-    
+            logging.debug(f"Attempt {attempt+1} failed to find 'Stats' tab.")
     return False
 
-# Function to obtain statistics from a single match
-def parse_match(url):
-    driver.get(url)
 
+def parse_match(driver: webdriver.Chrome, url: str) -> Optional[Dict[str, Any]]:
+    """Extracts team info, score, and stats from a specific match page."""
+    driver.get(url)
     wait = WebDriverWait(driver, 10)
     
     try:
         accept_button = wait.until(EC.element_to_be_clickable((By.ID, "onetrust-accept-btn-handler")))
         accept_button.click()
-    except:
+    except TimeoutException:
         pass
 
     if not click_stats_tab(wait):
-        print(f"Tab Stats not found for {url}")
+        logging.warning(f"Could not find 'Stats' tab for {url}")
         return None
     
     try:
         wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '.duelParticipant__startTime')))
-    except:
-        print(f"Timeout for {url}")
-        return None
-
-    try:
         team_home = driver.find_element(By.CSS_SELECTOR, '.duelParticipant__home .participant__participantName').text
         team_away = driver.find_element(By.CSS_SELECTOR, '.duelParticipant__away .participant__participantName').text
         score = driver.find_element(By.CSS_SELECTOR, '.detailScore__wrapper').text.replace('\n', ' ')
-    except:
-        team_home = team_away = score = None
+    except (TimeoutException, NoSuchElementException):
+        logging.warning(f"Header data missing or timeout for {url}")
+        return None
     
-    elements = wait.until(
-        EC.visibility_of_all_elements_located((By.CSS_SELECTOR, '[data-testid="wcl-scores-simple-text-01"]'))
-    )
-    
+    try:
+        elements = wait.until(
+            EC.visibility_of_all_elements_located((By.CSS_SELECTOR, '[data-testid="wcl-scores-simple-text-01"]'))
+        )
+    except TimeoutException:
+        logging.warning(f"Stat elements not visible for {url}")
+        return None
+
+    # Determine the Matchday (Round)
     matchday_items = driver.find_elements(By.CSS_SELECTOR, "span[data-testid='wcl-scores-overline-03']")
+    pattern = re.compile(rf"{LEAGUE}\s*-\s*ROUND\s*(\d+)", re.IGNORECASE)
     
-    # Regex for finding "<LEAGUE> - ROUND #"
-    pattern = re.compile(rf"{league}\s*-\s*ROUND\s*(\d+)", re.IGNORECASE)
-    
+    matchday = None
     for el in matchday_items:
-        text = el.text.strip()
-        match = pattern.search(text)
+        match = pattern.search(el.text.strip())
         if match:
             matchday = match.group(1)
             break
-    else:
-        raise Exception("No matches found.")
+            
+    if not matchday:
+        logging.error(f"Could not identify the Matchday for {url}.")
+        return None
 
-        
-    data = []
-    for i in elements:
-        data.append(i.text)
-    
-    stats = stats_object_from_list(data)
+    raw_data = [el.text for el in elements]
+    stats = stats_object_from_list(raw_data)
 
     return {
         'url': url,
@@ -162,12 +181,14 @@ def parse_match(url):
         'stats': stats
     }
 
-def convert_row(match):
+
+def convert_to_row(match: Dict[str, Any]) -> Dict[str, Any]:
+    """Flattens the match dictionary into a single-level row for CSV export."""
     row = {
         'url': match['url'],
         'home_team': match['home_team'],
         'away_team': match['away_team'],
-        'matchday': match['matchday'],
+        'matchday': int(match['matchday']),
         'score': match['score']
     }
     for stat_name, stat_values in match['stats'].items():
@@ -175,39 +196,65 @@ def convert_row(match):
         row[f"{stat_name}_away"] = stat_values['away']
     return row
 
-links = get_match_links()
+# =====================================================================
+# MAIN EXECUTION
+# =====================================================================
 
+def main():
+    # Ensure data directory exists
+    STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# If file does not exists, create it empty
-if not os.path.exists(stats_path):
-    with open(stats_path, "w") as f:
-        pass
-
-# Try to read csv, but handle empty case
-try:
-    existing_data = pd.read_csv(stats_path)
-except pd.errors.EmptyDataError:
-    existing_data = pd.DataFrame(columns=["url"])
-
-# For on links
-for i, link in enumerate(links):
-    if link not in existing_data["url"].values:  
-        print(f"[{i+1}/{len(links)}] Extracting: {link}")
-        
-        match = parse_match(link)
-        if match:
-            data = convert_row(match)  
-            data = pd.DataFrame([data])
-            # Add and save
-            existing_data = pd.concat([existing_data, data], ignore_index=True)
-            existing_data.to_csv(stats_path, index=False)
-            
-        time.sleep(2)
+    # Load existing data to avoid duplicates and ensure column alignment
+    if STATS_PATH.exists():
+        try:
+            df_main = pd.read_csv(STATS_PATH)
+            processed_urls = set(df_main['url'].dropna())
+        except pd.errors.EmptyDataError:
+            df_main = pd.DataFrame(columns=["url"])
+            processed_urls = set()
     else:
-        print(f"[{i+1}/{len(links)}] Skipped (already present): {link}")
+        df_main = pd.DataFrame(columns=["url"])
+        processed_urls = set()
 
+    driver = init_driver()
+    
+    try:
+        logging.info("Fetching match links from results page...")
+        links = get_match_links(driver, RESULTS_URL)
 
-# Order by matchday ascending
-df = pd.read_csv(stats_path)
-df = df.sort_values(by="matchday")
-df.to_csv(stats_path)
+        for i, link in enumerate(links, start=1):
+            if link in processed_urls:
+                logging.info(f"[{i}/{len(links)}] Skipped (already exists): {link}")
+                continue
+
+            logging.info(f"[{i}/{len(links)}] Processing: {link}")
+            match_data = parse_match(driver, link)
+            
+            if match_data:
+                new_row_df = pd.DataFrame([convert_to_row(match_data)])
+                
+                # Using concat ensures column alignment via header names (prevents shifting)
+                df_main = pd.concat([df_main, new_row_df], ignore_index=True)
+                
+                # Save after every successful scrape to prevent data loss
+                df_main.to_csv(STATS_PATH, index=False)
+                
+            time.sleep(2) # Politeness delay
+            
+    finally:
+        logging.info("Closing WebDriver.")
+        driver.quit()
+
+    # Final sort by matchday
+    if STATS_PATH.exists():
+        try:
+            logging.info("Sorting final CSV by matchday...")
+            df_final = pd.read_csv(STATS_PATH)
+            df_final = df_final.sort_values(by="matchday")
+            df_final.to_csv(STATS_PATH, index=False)
+            logging.info("Process finished successfully.")
+        except Exception as e:
+            logging.error(f"Error during final CSV sorting: {e}")
+
+if __name__ == "__main__":
+    main()
